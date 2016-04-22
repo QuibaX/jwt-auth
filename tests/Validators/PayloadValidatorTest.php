@@ -9,16 +9,22 @@
  * file that was distributed with this source code.
  */
 
-namespace Tymon\JWTAuth\Test;
+namespace Tymon\JWTAuth\Test\Validators;
 
-use Carbon\Carbon;
+use Tymon\JWTAuth\Test\AbstractTestCase;
 use Tymon\JWTAuth\Validators\PayloadValidator;
 
-class PayloadValidatorTest extends \PHPUnit_Framework_TestCase
+class PayloadValidatorTest extends AbstractTestCase
 {
+    /**
+     * @var \Tymon\JWTAuth\Validators\PayloadValidator
+     */
+    protected $validator;
+
     public function setUp()
     {
-        Carbon::setTestNow(Carbon::createFromTimeStampUTC(123));
+        parent::setUp();
+
         $this->validator = new PayloadValidator();
     }
 
@@ -27,9 +33,9 @@ class PayloadValidatorTest extends \PHPUnit_Framework_TestCase
     {
         $payload = [
             'iss' => 'http://example.com',
-            'iat' => 100,
-            'nbf' => 100,
-            'exp' => 100 + 3600,
+            'iat' => $this->testNowTimestamp,
+            'nbf' => $this->testNowTimestamp,
+            'exp' => $this->testNowTimestamp + 3600,
             'sub' => 1,
             'jti' => 'foo',
         ];
@@ -37,16 +43,17 @@ class PayloadValidatorTest extends \PHPUnit_Framework_TestCase
         $this->assertTrue($this->validator->isValid($payload));
     }
 
-    /** @test */
+    /**
+     * @test
+     * @expectedException \Tymon\JWTAuth\Exceptions\TokenExpiredException
+     */
     public function it_should_throw_an_exception_when_providing_an_expired_payload()
     {
-        $this->setExpectedException('Tymon\JWTAuth\Exceptions\TokenExpiredException');
-
         $payload = [
             'iss' => 'http://example.com',
-            'iat' => 20,
-            'nbf' => 20,
-            'exp' => 120,
+            'iat' => $this->testNowTimestamp - 3660,
+            'nbf' => $this->testNowTimestamp - 3660,
+            'exp' => $this->testNowTimestamp - 1440,
             'sub' => 1,
             'jti' => 'foo',
         ];
@@ -54,16 +61,17 @@ class PayloadValidatorTest extends \PHPUnit_Framework_TestCase
         $this->validator->check($payload);
     }
 
-    /** @test */
+    /**
+     * @test
+     * @expectedException \Tymon\JWTAuth\Exceptions\TokenInvalidException
+     */
     public function it_should_throw_an_exception_when_providing_an_invalid_nbf_claim()
     {
-        $this->setExpectedException('Tymon\JWTAuth\Exceptions\TokenInvalidException');
-
         $payload = [
             'iss' => 'http://example.com',
-            'iat' => 100,
-            'nbf' => 150,
-            'exp' => 150 + 3600,
+            'iat' => $this->testNowTimestamp - 3660,
+            'nbf' => $this->testNowTimestamp + 3660,
+            'exp' => $this->testNowTimestamp + 1440,
             'sub' => 1,
             'jti' => 'foo',
         ];
@@ -71,16 +79,17 @@ class PayloadValidatorTest extends \PHPUnit_Framework_TestCase
         $this->validator->check($payload);
     }
 
-    /** @test */
+    /**
+     * @test
+     * @expectedException \Tymon\JWTAuth\Exceptions\TokenInvalidException
+     */
     public function it_should_throw_an_exception_when_providing_an_invalid_iat_claim()
     {
-        $this->setExpectedException('Tymon\JWTAuth\Exceptions\TokenInvalidException');
-
         $payload = [
             'iss' => 'http://example.com',
-            'iat' => 150,
-            'nbf' => 100,
-            'exp' => 150 + 3600,
+            'iat' => $this->testNowTimestamp + 3660,
+            'nbf' => $this->testNowTimestamp - 3660,
+            'exp' => $this->testNowTimestamp + 1440,
             'sub' => 1,
             'jti' => 'foo',
         ];
@@ -88,11 +97,12 @@ class PayloadValidatorTest extends \PHPUnit_Framework_TestCase
         $this->validator->check($payload);
     }
 
-    /** @test */
+    /**
+     * @test
+     * @expectedException \Tymon\JWTAuth\Exceptions\TokenInvalidException
+     */
     public function it_should_throw_an_exception_when_providing_an_invalid_payload()
     {
-        $this->setExpectedException('Tymon\JWTAuth\Exceptions\TokenInvalidException');
-
         $payload = [
             'iss' => 'http://example.com',
             'sub' => 1,
@@ -101,19 +111,83 @@ class PayloadValidatorTest extends \PHPUnit_Framework_TestCase
         $this->validator->check($payload);
     }
 
-    /** @test */
+    /**
+     * @test
+     * @expectedException \Tymon\JWTAuth\Exceptions\TokenInvalidException
+     */
     public function it_should_throw_an_exception_when_providing_an_invalid_expiry()
     {
-        $this->setExpectedException('Tymon\JWTAuth\Exceptions\TokenInvalidException');
-
         $payload = [
             'iss' => 'http://example.com',
-            'iat' => 100,
+            'iat' => $this->testNowTimestamp - 3660,
             'exp' => 'foo',
             'sub' => 1,
             'jti' => 'foo',
         ];
 
         $this->validator->check($payload);
+    }
+
+    /** @test */
+    public function it_should_set_the_required_claims()
+    {
+        $payload = [
+            'iss' => 'http://example.com',
+            'sub' => 1,
+        ];
+
+        $this->assertTrue($this->validator->setRequiredClaims(['iss', 'sub'])->isValid($payload));
+    }
+
+    /** @test */
+    public function it_should_check_the_token_in_the_refresh_context()
+    {
+        $payload = [
+            'iss' => 'http://example.com',
+            'iat' => $this->testNowTimestamp - 2600, // this is LESS than the refresh ttl at 1 hour
+            'nbf' => $this->testNowTimestamp,
+            'exp' => $this->testNowTimestamp - 1000,
+            'sub' => 1,
+            'jti' => 'foo',
+        ];
+
+        $this->assertTrue(
+            $this->validator->setRefreshFlow()->setRefreshTTL(60)->isValid($payload)
+        );
+    }
+
+    /** @test */
+    public function it_should_return_true_if_the_refresh_ttl_is_null()
+    {
+        $payload = [
+            'iss' => 'http://example.com',
+            'iat' => $this->testNowTimestamp - 2600,
+            'nbf' => $this->testNowTimestamp,
+            'exp' => $this->testNowTimestamp - 1000,
+            'sub' => 1,
+            'jti' => 'foo',
+        ];
+
+        $this->assertTrue(
+            $this->validator->setRefreshFlow()->setRefreshTTL(null)->isValid($payload)
+        );
+    }
+
+    /**
+     * @test
+     * @expectedException \Tymon\JWTAuth\Exceptions\TokenExpiredException
+     */
+    public function it_should_throw_an_exception_if_the_token_cannot_be_refreshed()
+    {
+        $payload = [
+            'iss' => 'http://example.com',
+            'iat' => $this->testNowTimestamp - 5000, // this is MORE than the refresh ttl at 1 hour, so is invalid
+            'nbf' => $this->testNowTimestamp,
+            'exp' => $this->testNowTimestamp,
+            'sub' => 1,
+            'jti' => 'foo',
+        ];
+
+        $this->validator->setRefreshFlow()->setRefreshTTL(60)->check($payload);
     }
 }

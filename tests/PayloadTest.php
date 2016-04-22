@@ -9,65 +9,81 @@
  * file that was distributed with this source code.
  */
 
-namespace Tymon\JWTAuth\Test\Providers\JWT;
+namespace Tymon\JWTAuth\Test;
 
-use Carbon\Carbon;
-use Tymon\JWTAuth\Payload;
 use Mockery;
-use Tymon\JWTAuth\Claims\Issuer;
-use Tymon\JWTAuth\Claims\IssuedAt;
-use Tymon\JWTAuth\Claims\Expiration;
-use Tymon\JWTAuth\Claims\NotBefore;
-use Tymon\JWTAuth\Claims\Audience;
-use Tymon\JWTAuth\Claims\Subject;
+use Tymon\JWTAuth\Payload;
+use Tymon\JWTAuth\Claims\Claim;
 use Tymon\JWTAuth\Claims\JwtId;
+use Tymon\JWTAuth\Claims\Issuer;
+use Tymon\JWTAuth\Claims\Subject;
+use Illuminate\Support\Collection;
+use Tymon\JWTAuth\Claims\Audience;
+use Tymon\JWTAuth\Claims\IssuedAt;
+use Tymon\JWTAuth\Claims\NotBefore;
+use Tymon\JWTAuth\Claims\Expiration;
+use Tymon\JWTAuth\Validators\PayloadValidator;
 
-class PayloadTest extends \PHPUnit_Framework_TestCase
+class PayloadTest extends AbstractTestCase
 {
+    /**
+     * @var \Mockery\MockInterface
+     */
+    protected $validator;
+
+    /**
+     * @var \Tymon\JWTAuth\Payload
+     */
+    protected $payload;
+
     public function setUp()
     {
-        Carbon::setTestNow(Carbon::createFromTimeStampUTC(123));
+        parent::setUp();
 
         $claims = [
-            new Subject(1),
-            new Issuer('http://example.com'),
-            new Expiration(123 + 3600),
-            new NotBefore(123),
-            new IssuedAt(123),
-            new JwtId('foo'),
+            'sub' => new Subject(1),
+            'iss' => new Issuer('http://example.com'),
+            'exp' => new Expiration($this->testNowTimestamp + 3600),
+            'nbf' => new NotBefore($this->testNowTimestamp),
+            'iat' => new IssuedAt($this->testNowTimestamp),
+            'jti' => new JwtId('foo'),
         ];
 
-        $this->validator = Mockery::mock('Tymon\JWTAuth\Validators\PayloadValidator');
+        $this->validator = Mockery::mock(PayloadValidator::class);
         $this->validator->shouldReceive('setRefreshFlow->check');
 
-        $this->payload = new Payload($claims, $this->validator);
+        $this->payload = new Payload(Collection::make($claims), $this->validator);
     }
 
     public function tearDown()
     {
         Mockery::close();
+
+        parent::tearDown();
     }
 
-    /** @test */
-    public function it_throws_an_exception_when_trying_to_add_to_the_payload()
+    /**
+     * @test
+     * @expectedException \Tymon\JWTAuth\Exceptions\PayloadException
+     */
+    public function it_should_throw_an_exception_when_trying_to_add_to_the_payload()
     {
-        $this->setExpectedException('Tymon\JWTAuth\Exceptions\PayloadException');
-
         $this->payload['foo'] = 'bar';
     }
 
-    /** @test */
-    public function it_throws_an_exception_when_trying_to_remove_a_key_from_the_payload()
+    /**
+     * @test
+     * @expectedException \Tymon\JWTAuth\Exceptions\PayloadException
+     */
+    public function it_should_throw_an_exception_when_trying_to_remove_a_key_from_the_payload()
     {
-        $this->setExpectedException('Tymon\JWTAuth\Exceptions\PayloadException');
-
         unset($this->payload['foo']);
     }
 
     /** @test */
     public function it_should_cast_the_payload_to_a_string_as_json()
     {
-        $this->assertEquals((string) $this->payload, json_encode($this->payload->get()));
+        $this->assertSame((string) $this->payload, json_encode($this->payload->get(), JSON_UNESCAPED_SLASHES));
         $this->assertJsonStringEqualsJsonString((string) $this->payload, json_encode($this->payload->get()));
     }
 
@@ -75,7 +91,7 @@ class PayloadTest extends \PHPUnit_Framework_TestCase
     public function it_should_allow_array_access_on_the_payload()
     {
         $this->assertTrue(isset($this->payload['iat']));
-        $this->assertEquals($this->payload['sub'], 1);
+        $this->assertSame($this->payload['sub'], 1);
         $this->assertArrayHasKey('exp', $this->payload);
     }
 
@@ -83,7 +99,14 @@ class PayloadTest extends \PHPUnit_Framework_TestCase
     public function it_should_get_properties_of_payload_via_get_method()
     {
         $this->assertInternalType('array', $this->payload->get());
-        $this->assertEquals($this->payload->get('sub'), 1);
+        $this->assertSame($this->payload->get('sub'), 1);
+
+        $this->assertSame(
+            $this->payload->get(function () {
+                return 'jti';
+            }),
+            'foo'
+        );
     }
 
     /** @test */
@@ -94,8 +117,8 @@ class PayloadTest extends \PHPUnit_Framework_TestCase
         list($sub, $jti) = $values;
 
         $this->assertInternalType('array', $values);
-        $this->assertEquals($sub, 1);
-        $this->assertEquals($jti, 'foo');
+        $this->assertSame($sub, 1);
+        $this->assertSame($jti, 'foo');
     }
 
     /** @test */
@@ -112,16 +135,33 @@ class PayloadTest extends \PHPUnit_Framework_TestCase
         $jti = $this->payload->getJwtId();
         $iss = $this->payload->getIssuer();
 
-        $this->assertEquals($sub, 1);
-        $this->assertEquals($jti, 'foo');
-        $this->assertEquals($iss, 'http://example.com');
+        $this->assertSame($sub, 1);
+        $this->assertSame($jti, 'foo');
+        $this->assertSame($iss, 'http://example.com');
     }
 
     /** @test */
+    public function it_should_invoke_the_instance_as_a_callable()
+    {
+        $payload = $this->payload;
+
+        $sub = $payload('sub');
+        $jti = $payload('jti');
+        $iss = $payload('iss');
+
+        $this->assertSame($sub, 1);
+        $this->assertSame($jti, 'foo');
+        $this->assertSame($iss, 'http://example.com');
+
+        $this->assertSame($payload(), $this->payload->toArray());
+    }
+
+    /**
+     * @test
+     * @expectedException \BadMethodCallException
+     */
     public function it_should_throw_an_exception_when_magically_getting_a_property_that_does_not_exist()
     {
-        $this->setExpectedException('\BadMethodCallException');
-
         $this->payload->getFoo();
     }
 
@@ -130,7 +170,24 @@ class PayloadTest extends \PHPUnit_Framework_TestCase
     {
         $claims = $this->payload->getClaims();
 
-        $this->assertInstanceOf('Tymon\JWTAuth\Claims\Expiration', $claims[2]);
-        $this->assertInstanceOf('Tymon\JWTAuth\Claims\JwtId', $claims[5]);
+        $this->assertInstanceOf(Expiration::class, $claims['exp']);
+        $this->assertInstanceOf(JwtId::class, $claims['jti']);
+        $this->assertInstanceOf(Subject::class, $claims['sub']);
+
+        $this->assertContainsOnlyInstancesOf(Claim::class, $claims);
+    }
+
+    /** @test */
+    public function it_should_get_the_object_as_json()
+    {
+        $this->assertJsonStringEqualsJsonString(json_encode($this->payload), $this->payload->toJson());
+    }
+
+    /** @test */
+    public function it_should_count_the_claims()
+    {
+        $this->assertSame(6, $this->payload->count());
+        $this->assertSame(6, count($this->payload));
+        $this->assertCount(6, $this->payload);
     }
 }

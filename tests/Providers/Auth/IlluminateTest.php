@@ -12,19 +12,35 @@
 namespace Tymon\JWTAuth\Test\Providers\Auth;
 
 use Mockery;
-use Tymon\JWTAuth\Providers\Auth\IlluminateAuthAdapter;
+use Illuminate\Contracts\Auth\Guard;
+use Tymon\JWTAuth\Test\AbstractTestCase;
+use Tymon\JWTAuth\Providers\Auth\Illuminate as Auth;
 
-class IlluminateAuthAdapterTest extends \PHPUnit_Framework_TestCase
+class IlluminateTest extends AbstractTestCase
 {
+    /**
+     * @var \Mockery\MockInterface|\Illuminate\Contracts\Auth\Guard
+     */
+    protected $authManager;
+
+    /**
+     * @var \Tymon\JWTAuth\Providers\Auth\Illuminate
+     */
+    protected $auth;
+
     public function setUp()
     {
-        $this->authManager = Mockery::mock('Illuminate\Auth\AuthManager');
-        $this->auth = new IlluminateAuthAdapter($this->authManager);
+        parent::setUp();
+
+        $this->authManager = Mockery::mock(Guard::class);
+        $this->auth = new Auth($this->authManager);
     }
 
     public function tearDown()
     {
         Mockery::close();
+
+        parent::tearDown();
     }
 
     /** @test */
@@ -60,6 +76,6 @@ class IlluminateAuthAdapterTest extends \PHPUnit_Framework_TestCase
     public function it_should_return_the_currently_authenticated_user()
     {
         $this->authManager->shouldReceive('user')->once()->andReturn((object) ['id' => 1]);
-        $this->assertEquals($this->auth->user()->id, 1);
+        $this->assertSame($this->auth->user()->id, 1);
     }
 }
